@@ -234,22 +234,32 @@ adjustedPrice *= trimMultiplier;
         : "low";
 
     return res.status(200).json({
-      recommendedList,
-      expectedCloseRange,
-      baseMedian,
-      weightedBase,
-      mode,
-      compCount,
-      confidence,
-      conditionRating,
-      conditionMultiplier,
-      trimTier,
-      trimMultiplier,
-      cabTier,
-      cabMultiplier,
-      boxTier,
-      boxMultiplier,
-    });
+  recommendedList,
+  expectedCloseRange,
+  baseMedian,
+  weightedBase: Math.round(weightedBase),
+  mode,
+  compCount,
+  confidence,
+
+  // condition
+  conditionRating,
+  conditionMultiplier,
+
+  // accident
+  accidentGrade,
+  accidentMultiplier,
+
+  // cab/box
+  cabTier,
+  cabMultiplier,
+  boxTier,
+  boxMultiplier,
+
+  // trim
+  trimTier,
+  trimMultiplier
+});
 
   } catch (err) {
     return res.status(500).json({ error: err.message });
