@@ -239,11 +239,17 @@ breakdown.afterTrim = {
 };
     
     // Mode adjustment
-    if (mode === "fast") {
-      adjustedPrice *= 0.97; // -3%
-    } else if (mode === "max") {
-      adjustedPrice *= 1.05; // +5%
-    }
+    let modeMultiplier = 1.0;
+    if (mode === "fast") modeMultiplier = 0.97;
+    else if (mode === "max") modeMultiplier = 1.05;
+    
+    adjustedPrice *= modeMultiplier;
+    
+    // record mode step in breakdown
+    breakdown.afterMode = {
+      price: Math.round(adjustedPrice),
+      multiplier: modeMultiplier
+    };
 
     const recommendedList = Math.round(adjustedPrice);
     const expectedCloseLow = Math.round(recommendedList * 0.97);
