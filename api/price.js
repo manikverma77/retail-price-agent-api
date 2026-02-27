@@ -27,6 +27,30 @@ function weightedMedian(values, weights) {
   return sorted[sorted.length - 1].v;
 }
 
+function classifyTrimTier(trimRaw) {
+  const t = (trimRaw || "").toString().toUpperCase();
+
+  if (!t) return { tier: "unknown", matched: null };
+
+  // ULTRA / top trims across brands
+  const ultra = ["DENALI", "HIGH COUNTRY", "LIMITED", "PLATINUM", "AUTOBIOGRAPHY", "SIGNATURE", "MAYBACH"];
+  if (ultra.some(k => t.includes(k))) return { tier: "ultra", matched: ultra.find(k => t.includes(k)) };
+
+  // PREMIUM trims
+  const premium = ["KING RANCH", "LARAMIE", "LTZ", "SLT", "PREMIER", "RESERVE", "SUMMIT", "OVERLAND", "TRAIL BOSS", "AT4"];
+  if (premium.some(k => t.includes(k))) return { tier: "premium", matched: premium.find(k => t.includes(k)) };
+
+  // MID trims
+  const mid = ["LARIAT", "BIG HORN", "BIGHORN", "SPORT", "XLT", "SLE", "LT", "ELEVATION", "RST", "REBEL"];
+  if (mid.some(k => t.includes(k))) return { tier: "mid", matched: mid.find(k => t.includes(k)) };
+
+  // BASE trims
+  const base = ["TRADESMAN", "XL", "CUSTOM", "WT", "WORK TRUCK", "PRO", "ST"];
+  if (base.some(k => t.includes(k))) return { tier: "base", matched: base.find(k => t.includes(k)) };
+
+  return { tier: "unknown", matched: null };
+}
+
 module.exports = async (req, res) => {
   try {
     if (req.method !== "POST") {
@@ -80,6 +104,28 @@ const accidentMultiplier =
 
 adjustedPrice *= accidentMultiplier;
     
+    // Trim tier adjustment
+const trimRaw = vehicle.trim || "";
+const { tier: trimTier, matched: matchedKeyword } = classifyTrimTier(trimRaw);
+
+// Default trim multipliers (overrideable)
+const defaultTrimMultipliers = {
+  base: 1.00,
+  mid: 1.02,
+  premium: 1.05,
+  ultra: 1.08,
+  unknown: 1.00
+};
+
+const trimMultipliers =
+  (body.trimMultipliers && typeof body.trimMultipliers === "object")
+    ? { ...defaultTrimMultipliers, ...body.trimMultipliers }
+    : defaultTrimMultipliers;
+
+const trimMultiplier = trimMultipliers[trimTier] || 1.00;
+
+adjustedPrice *= trimMultiplier;
+    
     // Mode adjustment
     if (mode === "fast") {
       adjustedPrice *= 0.97; // -3%
@@ -100,12 +146,14 @@ adjustedPrice *= accidentMultiplier;
 
     return res.status(200).json({
       recommendedList,
-      expectedCloseRange: [expectedCloseLow, expectedCloseHigh],
+      expectedCloseRange,
       baseMedian,
-      weightedBase: Math.round(weightedBase),
+      weightedBase,
       mode,
-      compCount: comps.length,
-      confidence
+      compCount,
+      confidence,
+      trimTier,
+      trimMultiplier
     });
 
   } catch (err) {
