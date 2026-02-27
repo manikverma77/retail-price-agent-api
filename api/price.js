@@ -136,6 +136,7 @@ adjustedPrice *= trimMultiplier;
     const recommendedList = Math.round(adjustedPrice);
     const expectedCloseLow = Math.round(recommendedList * 0.97);
     const expectedCloseHigh = Math.round(recommendedList * 0.995);
+    const expectedCloseRange = [expectedCloseLow, expectedCloseHigh];
 
     const confidence =
       comps.length >= 8
