@@ -63,12 +63,17 @@ module.exports = async (req, res) => {
 const accidentGrade = body.accidentGrade || "minor";
 
 // Default accident adjustment table (can be overridden later)
-const accidentAdjustments = {
+const defaultAccidentAdjustments = {
   none: 1.02,      // clean carfax premium
   minor: 1.00,
   moderate: 0.97,
   large: 0.94
 };
+
+const accidentAdjustments =
+  (body.accidentAdjustments && typeof body.accidentAdjustments === "object")
+    ? { ...defaultAccidentAdjustments, ...body.accidentAdjustments }
+    : defaultAccidentAdjustments;
 
 const accidentMultiplier =
   accidentAdjustments[accidentGrade] || 1.00;
