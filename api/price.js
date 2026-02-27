@@ -1,6 +1,13 @@
 // POST /api/price
 // Basic pricing engine using manual comps + mode adjustment
 
+function formatCurrency(value) {
+  return new Intl.NumberFormat("en-CA", {
+    style: "currency",
+    currency: "CAD",
+    maximumFractionDigits: 0
+  }).format(value);
+}
 function median(arr) {
   const sorted = [...arr].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
