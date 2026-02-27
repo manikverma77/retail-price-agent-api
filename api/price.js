@@ -365,22 +365,37 @@ module.exports = async (req, res) => {
       fuelTypeRaw: vehicle.fuelType
     });
 
-    const defaultEngineMultipliers = {
-      diesel: 1.06,
-      gas: 1.0,
-      hybrid: 1.03,
-      electric: 1.02,
-      unknown: 1.0
-    };
+// Segment detection (used to tune engine premiums)
+const segment = detectVehicleSegment(vehicle);
 
-    const engineMultipliers =
-      body.engineMultipliers && typeof body.engineMultipliers === "object"
-        ? { ...defaultEngineMultipliers, ...body.engineMultipliers }
-        : defaultEngineMultipliers;
+// Segment-aware default engine multipliers (overrideable)
+const defaultEngineMultipliersBySegment = {
+  hd:      { diesel: 1.07, gas: 1.00, hybrid: 1.03, electric: 1.02, unknown: 1.00 },
+  halfton: { diesel: 1.03, gas: 1.00, hybrid: 1.03, electric: 1.02, unknown: 1.00 },
+  other:   { diesel: 1.05, gas: 1.00, hybrid: 1.03, electric: 1.02, unknown: 1.00 }
+};
 
-    const engineMultiplier = engineMultipliers[engineType] ?? 1.0;
-    adjustedPrice *= engineMultiplier;
-    recordStep(breakdown, "afterEngine", adjustedPrice, engineMultiplier);
+// Optional override (same shape as defaultEngineMultipliersBySegment)
+// Example: body.engineMultipliersBySegment.hd.diesel = 1.08
+const engineMultipliersBySegment =
+  (body.engineMultipliersBySegment && typeof body.engineMultipliersBySegment === "object")
+    ? {
+        ...defaultEngineMultipliersBySegment,
+        ...body.engineMultipliersBySegment,
+        hd: { ...defaultEngineMultipliersBySegment.hd, ...(body.engineMultipliersBySegment.hd || {}) },
+        halfton: { ...defaultEngineMultipliersBySegment.halfton, ...(body.engineMultipliersBySegment.halfton || {}) },
+        other: { ...defaultEngineMultipliersBySegment.other, ...(body.engineMultipliersBySegment.other || {}) }
+      }
+    : defaultEngineMultipliersBySegment;
+
+const engineMultiplier =
+  (engineMultipliersBySegment[segment] &&
+   engineMultipliersBySegment[segment][engineType] != null)
+    ? engineMultipliersBySegment[segment][engineType]
+    : 1.00;
+
+adjustedPrice *= engineMultiplier;
+recordStep(breakdown, "afterEngine", adjustedPrice, engineMultiplier);
 
     // 4) Cab / 5) Box
     const cabTier = classifyCabTier(vehicle.cab);
