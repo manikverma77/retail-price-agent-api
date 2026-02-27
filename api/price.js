@@ -43,6 +43,54 @@ function recordStep(breakdown, key, price, multiplier) {
   };
 }
 
+function normalizeText(s) {
+  return (s || "")
+    .toString()
+    .toUpperCase()
+    .replace(/[_\-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Detect broad segment for trucks/SUVs without hardcoding every trim.
+// Returns: "hd" | "halfton" | "other"
+function detectVehicleSegment(vehicle) {
+  const make = normalizeText(vehicle.make);
+  const model = normalizeText(vehicle.model);
+  const trim = normalizeText(vehicle.trim);
+  const combined = normalizeText(`${make} ${model} ${trim}`);
+
+  // --- HD patterns ---
+  // RAM: 2500/3500
+  if (/\b(2\s?500|3\s?500)\b/.test(combined)) return "hd";
+
+  // Ford: F-250/F-350 (accept F250, F 250, SUPER DUTY)
+  if (/\bF\s?-?\s?2\s?50\b/.test(combined)) return "hd";
+  if (/\bF\s?-?\s?3\s?50\b/.test(combined)) return "hd";
+  if (combined.includes("SUPER DUTY")) return "hd";
+
+  // GM: 2500HD / 3500HD, 2500/3500
+  if (/\b(2\s?500HD|3\s?500HD)\b/.test(combined)) return "hd";
+  if (/\b(2\s?500|3\s?500)\b/.test(combined) && (combined.includes("SILVERADO") || combined.includes("SIERRA"))) return "hd";
+
+  // --- Half-ton patterns ---
+  // RAM 1500
+  if (/\b1\s?500\b/.test(combined) && combined.includes("RAM")) return "halfton";
+
+  // Ford F-150
+  if (/\bF\s?-?\s?1\s?50\b/.test(combined)) return "halfton";
+
+  // GM 1500
+  if (/\b1\s?500\b/.test(combined) && (combined.includes("SILVERADO") || combined.includes("SIERRA"))) return "halfton";
+
+  // Toyota / Nissan (default to half-ton if those models appear)
+  if (combined.includes("TUNDRA")) return "halfton";
+  if (combined.includes("TITAN")) return "halfton";
+
+  return "other";
+}
+
+
 function median(arr) {
   const sorted = [...arr].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
@@ -427,6 +475,7 @@ module.exports = async (req, res) => {
       accidentMultiplier,
 
       // engine
+      segment, 
       engineType,
       engineMultiplier,
 
