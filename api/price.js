@@ -25,6 +25,11 @@ function formatCurrency(value) {
   }).format(value);
 }
 
+function roundTo(n, decimals = 3) {
+  const p = Math.pow(10, decimals);
+  return Math.round(n * p) / p;
+}
+
 function recordStep(breakdown, key, price, multiplier) {
   // Previous step is the last inserted key
   const keys = Object.keys(breakdown);
@@ -463,6 +468,16 @@ recordStep(breakdown, "afterEngine", adjustedPrice, engineMultiplier);
     adjustedPrice *= modeMultiplier;
     recordStep(breakdown, "afterMode", adjustedPrice, modeMultiplier);
 
+    // Total (all-in) multiplier vs weightedBase (for drift detection / tuning)
+  const totalMultiplier =
+    (conditionMultiplier ?? 1) *
+    (accidentMultiplier ?? 1) *
+    (engineMultiplier ?? 1) *
+    (cabMultiplier ?? 1) *
+    (boxMultiplier ?? 1) *
+    (trimMultiplier ?? 1) *
+    (modeMultiplier ?? 1);
+    
     // Final outputs
     const recommendedList = Math.round(adjustedPrice);
     const expectedCloseLow = Math.round(recommendedList * 0.97);
@@ -474,6 +489,9 @@ recordStep(breakdown, "afterEngine", adjustedPrice, engineMultiplier);
 
     return res.status(200).json({
       recommendedList,
+      recommendedListFormatted: formatCurrency(recommendedList),
+      totalMultiplier: roundTo(totalMultiplier, 3),
+      totalMultiplierFormatted: `x${roundTo(totalMultiplier, 3)}`,
       expectedCloseRange,
       baseMedian,
       weightedBase: Math.round(weightedBase),
