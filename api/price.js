@@ -110,6 +110,11 @@ module.exports = async (req, res) => {
     const weightedBase = weightedMedian(compPrices, weights);
 
     let adjustedPrice = weightedBase;
+    // Diagnostic breakdown (price + multipliers at each step)
+    const breakdown = {
+      weightedBase: { price: Math.round(weightedBase), multiplier: 1.0 }
+    };
+    
     // Condition adjustment (1–5)
     const conditionRatingRaw = body.conditionRating;
     const conditionRating = Number.isFinite(Number(conditionRatingRaw))
@@ -133,7 +138,10 @@ const conditionMultipliers =
 const conditionMultiplier = conditionMultipliers[conditionRating] || 1.00;
 
 adjustedPrice *= conditionMultiplier;
-
+breakdown.afterCondition = {
+  price: Math.round(adjustedPrice),
+  multiplier: conditionMultiplier
+};
     
     // Accident adjustment
 const accidentGrade = body.accidentGrade || "minor";
@@ -155,7 +163,11 @@ const accidentMultiplier =
   accidentAdjustments[accidentGrade] || 1.00;
 
 adjustedPrice *= accidentMultiplier;
-  
+  breakdown.afterAccident = {
+  price: Math.round(adjustedPrice),
+  multiplier: accidentMultiplier
+};
+    
   // Cab/Box adjustment
 const cabTier = classifyCabTier(vehicle.cab || "");
 const boxTier = classifyBoxTier(vehicle.box || "");
@@ -175,7 +187,11 @@ const cabMultipliers =
 
 const cabMultiplier = cabMultipliers[cabTier] || 1.00;
 adjustedPrice *= cabMultiplier;
-
+breakdown.afterCab = {
+  price: Math.round(adjustedPrice),
+  multiplier: cabMultiplier
+};
+    
 // Default box multipliers (overrideable via body.boxMultipliers)
 const defaultBoxMultipliers = {
   short: 1.00,
@@ -191,6 +207,10 @@ const boxMultipliers =
 
 const boxMultiplier = boxMultipliers[boxTier] || 1.00;
 adjustedPrice *= boxMultiplier;
+breakdown.afterBox = {
+  price: Math.round(adjustedPrice),
+  multiplier: boxMultiplier
+};
     
     // Trim tier adjustment
 const trimRaw = vehicle.trim || "";
@@ -213,6 +233,10 @@ const trimMultipliers =
 const trimMultiplier = trimMultipliers[trimTier] || 1.00;
 
 adjustedPrice *= trimMultiplier;
+breakdown.afterTrim = {
+  price: Math.round(adjustedPrice),
+  multiplier: trimMultiplier
+};
     
     // Mode adjustment
     if (mode === "fast") {
@@ -258,7 +282,9 @@ adjustedPrice *= trimMultiplier;
 
   // trim
   trimTier,
-  trimMultiplier
+  trimMultiplier, 
+
+  breakdown, 
 });
 
   } catch (err) {
