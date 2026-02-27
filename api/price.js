@@ -8,6 +8,26 @@ function formatCurrency(value) {
     maximumFractionDigits: 0
   }).format(value);
 }
+
+function recordStep(breakdown, key, price, multiplier) {
+  // Find previous step price
+  const keys = Object.keys(breakdown);
+  const prevKey = keys[keys.length - 1];
+  const prevPrice = breakdown[prevKey]?.price ?? price;
+
+  const roundedPrice = Math.round(price);
+  const delta = roundedPrice - prevPrice;
+
+  breakdown[key] = {
+    price: roundedPrice,
+    priceFormatted: formatCurrency(roundedPrice),
+    delta,
+    deltaFormatted:
+      (delta >= 0 ? "+" : "-") + formatCurrency(Math.abs(delta)),
+    multiplier
+  };
+}
+
 function median(arr) {
   const sorted = [...arr].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
@@ -118,9 +138,8 @@ module.exports = async (req, res) => {
 
     let adjustedPrice = weightedBase;
     // Diagnostic breakdown (price + multipliers at each step)
-    const breakdown = {
-      weightedBase: { price: Math.round(weightedBase), multiplier: 1.0 }
-    };
+    const breakdown = {};
+    recordStep(breakdown, "weightedBase", weightedBase, 1.0);
     
     // Condition adjustment (1–5)
     const conditionRatingRaw = body.conditionRating;
@@ -145,10 +164,7 @@ const conditionMultipliers =
 const conditionMultiplier = conditionMultipliers[conditionRating] || 1.00;
 
 adjustedPrice *= conditionMultiplier;
-breakdown.afterCondition = {
-  price: Math.round(adjustedPrice),
-  multiplier: conditionMultiplier
-};
+recordStep(breakdown, "afterCondition", adjustedPrice, conditionMultiplier);
     
     // Accident adjustment
 const accidentGrade = body.accidentGrade || "minor";
@@ -170,10 +186,7 @@ const accidentMultiplier =
   accidentAdjustments[accidentGrade] || 1.00;
 
 adjustedPrice *= accidentMultiplier;
-  breakdown.afterAccident = {
-  price: Math.round(adjustedPrice),
-  multiplier: accidentMultiplier
-};
+recordStep(breakdown, "afterAccident", adjustedPrice, accidentMultiplier);
     
   // Cab/Box adjustment
 const cabTier = classifyCabTier(vehicle.cab || "");
@@ -194,10 +207,7 @@ const cabMultipliers =
 
 const cabMultiplier = cabMultipliers[cabTier] || 1.00;
 adjustedPrice *= cabMultiplier;
-breakdown.afterCab = {
-  price: Math.round(adjustedPrice),
-  multiplier: cabMultiplier
-};
+recordStep(breakdown, "afterCab", adjustedPrice, cabMultiplier);
     
 // Default box multipliers (overrideable via body.boxMultipliers)
 const defaultBoxMultipliers = {
@@ -214,10 +224,7 @@ const boxMultipliers =
 
 const boxMultiplier = boxMultipliers[boxTier] || 1.00;
 adjustedPrice *= boxMultiplier;
-breakdown.afterBox = {
-  price: Math.round(adjustedPrice),
-  multiplier: boxMultiplier
-};
+recordStep(breakdown, "afterBox", adjustedPrice, boxMultiplier);
     
     // Trim tier adjustment
 const trimRaw = vehicle.trim || "";
@@ -240,10 +247,7 @@ const trimMultipliers =
 const trimMultiplier = trimMultipliers[trimTier] || 1.00;
 
 adjustedPrice *= trimMultiplier;
-breakdown.afterTrim = {
-  price: Math.round(adjustedPrice),
-  multiplier: trimMultiplier
-};
+recordStep(breakdown, "afterTrim", adjustedPrice, trimMultiplier);
     
     // Mode adjustment
     let modeMultiplier = 1.0;
@@ -251,13 +255,8 @@ breakdown.afterTrim = {
     else if (mode === "max") modeMultiplier = 1.05;
     
     adjustedPrice *= modeMultiplier;
+    recordStep(breakdown, "afterMode", adjustedPrice, modeMultiplier);
     
-    // record mode step in breakdown
-    breakdown.afterMode = {
-      price: Math.round(adjustedPrice),
-      multiplier: modeMultiplier
-    };
-
     const recommendedList = Math.round(adjustedPrice);
     const expectedCloseLow = Math.round(recommendedList * 0.97);
     const expectedCloseHigh = Math.round(recommendedList * 0.995);
