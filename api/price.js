@@ -1,5 +1,21 @@
+// api/price.js
 // POST /api/price
-// Basic pricing engine using manual comps + mode adjustment
+//
+// Lightweight retail-pricing engine (manual comps) with an explainable, tunable multiplier stack.
+// Designed to scale across trucks/SUVs (2010–2025+) without hardcoding model-specific trims.
+//
+// Stack order (matches your "dealer reality" priorities):
+//   1) KM-weighted market anchor (from comps)
+//   2) Condition (1–5)
+//   3) Accident grade
+//   4) Engine type (diesel/gas/hybrid/electric)
+//   5) Cab tier
+//   6) Box tier
+//   7) Trim tier
+//   8) Mode (fast vs max)
+//
+// Everything is overrideable via request body tables to allow calibration + avoid drift.
+// Includes a diagnostic breakdown with $ formatting, deltas, and per-step multipliers.
 
 function formatCurrency(value) {
   return new Intl.NumberFormat("en-CA", {
@@ -10,10 +26,10 @@ function formatCurrency(value) {
 }
 
 function recordStep(breakdown, key, price, multiplier) {
-  // Find previous step price
+  // Previous step is the last inserted key
   const keys = Object.keys(breakdown);
   const prevKey = keys[keys.length - 1];
-  const prevPrice = breakdown[prevKey]?.price ?? price;
+  const prevPrice = breakdown[prevKey]?.price ?? Math.round(price);
 
   const roundedPrice = Math.round(price);
   const delta = roundedPrice - prevPrice;
@@ -22,8 +38,7 @@ function recordStep(breakdown, key, price, multiplier) {
     price: roundedPrice,
     priceFormatted: formatCurrency(roundedPrice),
     delta,
-    deltaFormatted:
-      (delta >= 0 ? "+" : "-") + formatCurrency(Math.abs(delta)),
+    deltaFormatted: (delta >= 0 ? "+" : "-") + formatCurrency(Math.abs(delta)),
     multiplier
   };
 }
@@ -37,65 +52,100 @@ function median(arr) {
 }
 
 function weightedMedian(values, weights) {
-  const sorted = values
+  // Weighted median of values, with corresponding positive weights.
+  const pairs = values
     .map((v, i) => ({ v, w: weights[i] }))
     .sort((a, b) => a.v - b.v);
 
   const totalWeight = weights.reduce((a, b) => a + b, 0);
   let cumulative = 0;
 
-  for (let item of sorted) {
-    cumulative += item.w;
-    if (cumulative >= totalWeight / 2) {
-      return item.v;
-    }
+  for (const p of pairs) {
+    cumulative += p.w;
+    if (cumulative >= totalWeight / 2) return p.v;
   }
-
-  return sorted[sorted.length - 1].v;
+  return pairs[pairs.length - 1].v;
 }
 
 function classifyTrimTier(trimRaw) {
-  const t = (trimRaw || "").toString().toUpperCase();
-
+  const t = (trimRaw || "").toString().toUpperCase().trim();
   if (!t) return { tier: "unknown", matched: null };
 
-  // ULTRA / top trims across brands
-  const ultra = ["DENALI", "HIGH COUNTRY", "LIMITED", "PLATINUM", "AUTOBIOGRAPHY", "SIGNATURE", "MAYBACH"];
-  if (ultra.some(k => t.includes(k))) return { tier: "ultra", matched: ultra.find(k => t.includes(k)) };
+  // Ultra / top trims across brands
+  const ultra = [
+    "DENALI",
+    "HIGH COUNTRY",
+    "LIMITED",
+    "PLATINUM",
+    "AUTOBIOGRAPHY",
+    "SIGNATURE",
+    "MAYBACH"
+  ];
+  const ultraHit = ultra.find((k) => t.includes(k));
+  if (ultraHit) return { tier: "ultra", matched: ultraHit };
 
-  // PREMIUM trims
-  const premium = ["KING RANCH", "LARAMIE", "LTZ", "SLT", "PREMIER", "RESERVE", "SUMMIT", "OVERLAND", "TRAIL BOSS", "AT4"];
-  if (premium.some(k => t.includes(k))) return { tier: "premium", matched: premium.find(k => t.includes(k)) };
+  // Premium trims
+  const premium = [
+    "KING RANCH",
+    "LARAMIE",
+    "LTZ",
+    "SLT",
+    "PREMIER",
+    "RESERVE",
+    "SUMMIT",
+    "OVERLAND",
+    "TRAIL BOSS",
+    "AT4"
+  ];
+  const premiumHit = premium.find((k) => t.includes(k));
+  if (premiumHit) return { tier: "premium", matched: premiumHit };
 
-  // MID trims
-  const mid = ["LARIAT", "BIG HORN", "BIGHORN", "SPORT", "XLT", "SLE", "LT", "ELEVATION", "RST", "REBEL"];
-  if (mid.some(k => t.includes(k))) return { tier: "mid", matched: mid.find(k => t.includes(k)) };
+  // Mid trims
+  const mid = [
+    "LARIAT",
+    "BIG HORN",
+    "BIGHORN",
+    "SPORT",
+    "XLT",
+    "SLE",
+    "LT",
+    "ELEVATION",
+    "RST",
+    "REBEL"
+  ];
+  const midHit = mid.find((k) => t.includes(k));
+  if (midHit) return { tier: "mid", matched: midHit };
 
-  // BASE trims
+  // Base trims
   const base = ["TRADESMAN", "XL", "CUSTOM", "WT", "WORK TRUCK", "PRO", "ST"];
-  if (base.some(k => t.includes(k))) return { tier: "base", matched: base.find(k => t.includes(k)) };
+  const baseHit = base.find((k) => t.includes(k));
+  if (baseHit) return { tier: "base", matched: baseHit };
 
   return { tier: "unknown", matched: null };
 }
 
 function classifyCabTier(cabRaw) {
-  const c = (cabRaw || "").toString().toUpperCase();
-
+  const c = (cabRaw || "").toString().toUpperCase().trim();
   if (!c) return "unknown";
 
+  // Premium
   if (c.includes("CREW") || c.includes("MEGA")) return "premium";
-  if (c.includes("DOUBLE") || c.includes("QUAD") || c.includes("SUPERCAB")) return "mid";
+
+  // Mid (various OEM naming)
+  if (c.includes("DOUBLE") || c.includes("QUAD") || c.includes("SUPERCAB"))
+    return "mid";
+
+  // Base
   if (c.includes("REGULAR")) return "base";
 
   return "unknown";
 }
 
 function classifyBoxTier(boxRaw) {
-  const b = (boxRaw || "").toString().toUpperCase();
-
+  const b = (boxRaw || "").toString().toUpperCase().trim();
   if (!b) return "unknown";
 
-  // Normalize common lengths
+  // Simple heuristics by presence of "5", "6", "8" (works for "6'4", "6.5", "8ft", etc.)
   if (b.includes("8")) return "long";
   if (b.includes("6")) return "standard";
   if (b.includes("5")) return "short";
@@ -107,28 +157,42 @@ function classifyEngineType({ engineRaw, fuelTypeRaw }) {
   const e = (engineRaw || "").toString().toUpperCase();
   const f = (fuelTypeRaw || "").toString().toUpperCase();
 
-  // Prefer explicit fuelType if provided
+  // Prefer explicit fuelType if present (e.g., from VIN decode)
   if (f.includes("DIESEL")) return "diesel";
   if (f.includes("GAS") || f.includes("GASOLINE")) return "gas";
   if (f.includes("HYBRID")) return "hybrid";
   if (f.includes("ELECTRIC")) return "electric";
 
-  // Infer from engine string keywords
-  const dieselKeys = ["DIESEL", "CUMMINS", "DURAMAX", "POWER STROKE", "POWERSTROKE", "TDI", "D4D"];
-  if (dieselKeys.some(k => e.includes(k))) return "diesel";
+  // Infer from engine string
+  const dieselKeys = [
+    "DIESEL",
+    "CUMMINS",
+    "DURAMAX",
+    "POWER STROKE",
+    "POWERSTROKE",
+    "TDI",
+    "D4D"
+  ];
+  if (dieselKeys.some((k) => e.includes(k))) return "diesel";
 
-  const hybridKeys = ["HYBRID"];
-  if (hybridKeys.some(k => e.includes(k))) return "hybrid";
+  if (e.includes("HYBRID")) return "hybrid";
 
-  const electricKeys = ["ELECTRIC", "EV"];
-  if (electricKeys.some(k => e.includes(k))) return "electric";
+  const electricKeys = ["ELECTRIC", " EV", "EV "];
+  if (electricKeys.some((k) => e.includes(k))) return "electric";
 
-  // If we have *any* engine displacement/cyl info but no diesel/hybrid/electric hint, treat as gas
-  if (e.match(/\d\.\dL/) || e.includes("V6") || e.includes("V8") || e.includes("I4") || e.includes("I6")) return "gas";
+  // If we see displacement/cylinder pattern but no diesel/hybrid/EV hints, assume gas
+  if (
+    /\d\.\dL/.test(e) ||
+    e.includes("V6") ||
+    e.includes("V8") ||
+    e.includes("I4") ||
+    e.includes("I6")
+  ) {
+    return "gas";
+  }
 
   return "unknown";
 }
-
 
 module.exports = async (req, res) => {
   try {
@@ -138,193 +202,247 @@ module.exports = async (req, res) => {
 
     const body = req.body || {};
     const vehicle = body.vehicle || {};
-    const comps = body.comps || [];
+    const comps = Array.isArray(body.comps) ? body.comps : [];
     const compCount = comps.length;
-    const mode = body.mode || "fast"; // fast or max
+    const mode = (body.mode || "fast").toString().toLowerCase(); // "fast" or "max"
 
-    if (!comps.length) {
+    if (compCount === 0) {
       return res.status(400).json({ error: "No comps provided." });
     }
 
-    // Normalize comp prices and km
-    const compPrices = comps.map(c => Number(c.price));
-    const compKms = comps.map(c => Number(c.km));
+    // --- Normalize comp numeric inputs ---
+    const compPrices = comps
+      .map((c) => Number(c.price))
+      .filter((v) => Number.isFinite(v) && v > 0);
 
-    // Compute baseline median price
-    const baseMedian = median(compPrices);
+    const compKms = comps
+      .map((c) => Number(c.km))
+      .filter((v) => Number.isFinite(v) && v >= 0);
 
-    // Weight comps closer in KM more heavily
-    const targetKm = Number(vehicle.km || 0);
-    const weights = compKms.map(km => {
+    if (compPrices.length === 0 || compKms.length === 0) {
+      return res
+        .status(400)
+        .json({ error: "Comps must include numeric price and km." });
+    }
+
+    // NOTE: If compPrices and compKms lengths diverge due to filtering,
+    // we should re-pair. To keep it simple and safe, re-build paired comps:
+    const paired = comps
+      .map((c) => ({ price: Number(c.price), km: Number(c.km) }))
+      .filter(
+        (p) =>
+          Number.isFinite(p.price) &&
+          p.price > 0 &&
+          Number.isFinite(p.km) &&
+          p.km >= 0
+      );
+
+    if (paired.length === 0) {
+      return res
+        .status(400)
+        .json({ error: "Comps must include numeric price and km." });
+    }
+
+    const prices = paired.map((p) => p.price);
+    const kms = paired.map((p) => p.km);
+
+    // --- Baseline market anchor ---
+    const baseMedian = median(prices);
+
+    // If vehicle.km is missing, default targetKm to median comp km to avoid skewed weights.
+    const targetKmRaw = Number(vehicle.km);
+    const targetKm = Number.isFinite(targetKmRaw) && targetKmRaw > 0 ? targetKmRaw : median(kms);
+
+    // Weight comps closer in KM more heavily (smooth decay)
+    const weights = kms.map((km) => {
       const diff = Math.abs(km - targetKm);
-      return 1 / (1 + diff / 20000); // smooth decay
+      return 1 / (1 + diff / 20000);
     });
 
-    const weightedBase = weightedMedian(compPrices, weights);
+    const weightedBase = weightedMedian(prices, weights);
 
+    // --- Multiplier stack ---
     let adjustedPrice = weightedBase;
-    // Diagnostic breakdown (price + multipliers at each step)
+
+    // Diagnostic breakdown (dealer-desk friendly)
     const breakdown = {};
     recordStep(breakdown, "weightedBase", weightedBase, 1.0);
-    
-    // Condition adjustment (1–5)
+
+    // 1) Condition (1–5)
     const conditionRatingRaw = body.conditionRating;
     const conditionRating = Number.isFinite(Number(conditionRatingRaw))
       ? Math.max(1, Math.min(5, Math.round(Number(conditionRatingRaw))))
-      : 3; // default "average"
+      : 3; // default average
 
-// Default condition multipliers (overrideable via body.conditionMultipliers)
-const defaultConditionMultipliers = {
-  1: 0.93,
-  2: 0.97,
-  3: 1.00,
-  4: 1.02,
-  5: 1.04
-};
+    const defaultConditionMultipliers = {
+      1: 0.93,
+      2: 0.97,
+      3: 1.0,
+      4: 1.02,
+      5: 1.04
+    };
 
-const conditionMultipliers =
-  (body.conditionMultipliers && typeof body.conditionMultipliers === "object")
-    ? { ...defaultConditionMultipliers, ...body.conditionMultipliers }
-    : defaultConditionMultipliers;
+    const conditionMultipliers =
+      body.conditionMultipliers && typeof body.conditionMultipliers === "object"
+        ? { ...defaultConditionMultipliers, ...body.conditionMultipliers }
+        : defaultConditionMultipliers;
 
-const conditionMultiplier = conditionMultipliers[conditionRating] || 1.00;
+    const conditionMultiplier = conditionMultipliers[conditionRating] ?? 1.0;
+    adjustedPrice *= conditionMultiplier;
+    recordStep(breakdown, "afterCondition", adjustedPrice, conditionMultiplier);
 
-adjustedPrice *= conditionMultiplier;
-recordStep(breakdown, "afterCondition", adjustedPrice, conditionMultiplier);
-    
-    // Accident adjustment
-const accidentGrade = body.accidentGrade || "minor";
+    // 2) Accident grade
+    const accidentGrade = (body.accidentGrade || "minor").toString().toLowerCase();
 
-// Default accident adjustment table (can be overridden later)
-const defaultAccidentAdjustments = {
-  none: 1.02,      // clean carfax premium
-  minor: 1.00,
-  moderate: 0.97,
-  large: 0.94
-};
+    const defaultAccidentAdjustments = {
+      none: 1.02, // clean premium (can be tuned)
+      minor: 1.0,
+      moderate: 0.97,
+      large: 0.94
+    };
 
-const accidentAdjustments =
-  (body.accidentAdjustments && typeof body.accidentAdjustments === "object")
-    ? { ...defaultAccidentAdjustments, ...body.accidentAdjustments }
-    : defaultAccidentAdjustments;
+    const accidentAdjustments =
+      body.accidentAdjustments && typeof body.accidentAdjustments === "object"
+        ? { ...defaultAccidentAdjustments, ...body.accidentAdjustments }
+        : defaultAccidentAdjustments;
 
-const accidentMultiplier =
-  accidentAdjustments[accidentGrade] || 1.00;
+    const accidentMultiplier = accidentAdjustments[accidentGrade] ?? 1.0;
+    adjustedPrice *= accidentMultiplier;
+    recordStep(breakdown, "afterAccident", adjustedPrice, accidentMultiplier);
 
-adjustedPrice *= accidentMultiplier;
-recordStep(breakdown, "afterAccident", adjustedPrice, accidentMultiplier);
-    
-  // Cab/Box adjustment
-const cabTier = classifyCabTier(vehicle.cab || "");
-const boxTier = classifyBoxTier(vehicle.box || "");
+    // 3) Engine type (diesel/gas/hybrid/electric)
+    // Prefer explicit vehicle.fuelType if provided (e.g., from VIN decode).
+    const engineType = classifyEngineType({
+      engineRaw: vehicle.engine,
+      fuelTypeRaw: vehicle.fuelType
+    });
 
-// Default cab multipliers (overrideable via body.cabMultipliers)
-const defaultCabMultipliers = {
-  premium: 1.04,
-  mid: 1.00,
-  base: 0.95,
-  unknown: 1.00
-};
+    const defaultEngineMultipliers = {
+      diesel: 1.06,
+      gas: 1.0,
+      hybrid: 1.03,
+      electric: 1.02,
+      unknown: 1.0
+    };
 
-const cabMultipliers =
-  (body.cabMultipliers && typeof body.cabMultipliers === "object")
-    ? { ...defaultCabMultipliers, ...body.cabMultipliers }
-    : defaultCabMultipliers;
+    const engineMultipliers =
+      body.engineMultipliers && typeof body.engineMultipliers === "object"
+        ? { ...defaultEngineMultipliers, ...body.engineMultipliers }
+        : defaultEngineMultipliers;
 
-const cabMultiplier = cabMultipliers[cabTier] || 1.00;
-adjustedPrice *= cabMultiplier;
-recordStep(breakdown, "afterCab", adjustedPrice, cabMultiplier);
-    
-// Default box multipliers (overrideable via body.boxMultipliers)
-const defaultBoxMultipliers = {
-  short: 1.00,
-  standard: 1.00,
-  long: 0.98,
-  unknown: 1.00
-};
+    const engineMultiplier = engineMultipliers[engineType] ?? 1.0;
+    adjustedPrice *= engineMultiplier;
+    recordStep(breakdown, "afterEngine", adjustedPrice, engineMultiplier);
 
-const boxMultipliers =
-  (body.boxMultipliers && typeof body.boxMultipliers === "object")
-    ? { ...defaultBoxMultipliers, ...body.boxMultipliers }
-    : defaultBoxMultipliers;
+    // 4) Cab / 5) Box
+    const cabTier = classifyCabTier(vehicle.cab);
+    const boxTier = classifyBoxTier(vehicle.box);
 
-const boxMultiplier = boxMultipliers[boxTier] || 1.00;
-adjustedPrice *= boxMultiplier;
-recordStep(breakdown, "afterBox", adjustedPrice, boxMultiplier);
-    
-    // Trim tier adjustment
-const trimRaw = vehicle.trim || "";
-const { tier: trimTier, matched: matchedKeyword } = classifyTrimTier(trimRaw);
+    const defaultCabMultipliers = {
+      premium: 1.04,
+      mid: 1.0,
+      base: 0.95,
+      unknown: 1.0
+    };
 
-// Default trim multipliers (overrideable)
-const defaultTrimMultipliers = {
-  base: 1.00,
-  mid: 1.02,
-  premium: 1.05,
-  ultra: 1.08,
-  unknown: 1.00
-};
+    const cabMultipliers =
+      body.cabMultipliers && typeof body.cabMultipliers === "object"
+        ? { ...defaultCabMultipliers, ...body.cabMultipliers }
+        : defaultCabMultipliers;
 
-const trimMultipliers =
-  (body.trimMultipliers && typeof body.trimMultipliers === "object")
-    ? { ...defaultTrimMultipliers, ...body.trimMultipliers }
-    : defaultTrimMultipliers;
+    const cabMultiplier = cabMultipliers[cabTier] ?? 1.0;
+    adjustedPrice *= cabMultiplier;
+    recordStep(breakdown, "afterCab", adjustedPrice, cabMultiplier);
 
-const trimMultiplier = trimMultipliers[trimTier] || 1.00;
+    const defaultBoxMultipliers = {
+      short: 1.0,
+      standard: 1.0,
+      long: 0.98,
+      unknown: 1.0
+    };
 
-adjustedPrice *= trimMultiplier;
-recordStep(breakdown, "afterTrim", adjustedPrice, trimMultiplier);
-    
-    // Mode adjustment
+    const boxMultipliers =
+      body.boxMultipliers && typeof body.boxMultipliers === "object"
+        ? { ...defaultBoxMultipliers, ...body.boxMultipliers }
+        : defaultBoxMultipliers;
+
+    const boxMultiplier = boxMultipliers[boxTier] ?? 1.0;
+    adjustedPrice *= boxMultiplier;
+    recordStep(breakdown, "afterBox", adjustedPrice, boxMultiplier);
+
+    // 6) Trim tier
+    const { tier: trimTier } = classifyTrimTier(vehicle.trim);
+
+    const defaultTrimMultipliers = {
+      base: 1.0,
+      mid: 1.02,
+      premium: 1.05,
+      ultra: 1.08,
+      unknown: 1.0
+    };
+
+    const trimMultipliers =
+      body.trimMultipliers && typeof body.trimMultipliers === "object"
+        ? { ...defaultTrimMultipliers, ...body.trimMultipliers }
+        : defaultTrimMultipliers;
+
+    const trimMultiplier = trimMultipliers[trimTier] ?? 1.0;
+    adjustedPrice *= trimMultiplier;
+    recordStep(breakdown, "afterTrim", adjustedPrice, trimMultiplier);
+
+    // 7) Mode (fast vs max)
+    // fast -> slight discount to clear faster
+    // max  -> slight premium to maximize gross
     let modeMultiplier = 1.0;
     if (mode === "fast") modeMultiplier = 0.97;
     else if (mode === "max") modeMultiplier = 1.05;
-    
+
     adjustedPrice *= modeMultiplier;
     recordStep(breakdown, "afterMode", adjustedPrice, modeMultiplier);
-    
+
+    // Final outputs
     const recommendedList = Math.round(adjustedPrice);
     const expectedCloseLow = Math.round(recommendedList * 0.97);
     const expectedCloseHigh = Math.round(recommendedList * 0.995);
     const expectedCloseRange = [expectedCloseLow, expectedCloseHigh];
 
     const confidence =
-      comps.length >= 8
-        ? "high"
-        : comps.length >= 4
-        ? "medium"
-        : "low";
+      compCount >= 8 ? "high" : compCount >= 4 ? "medium" : "low";
 
     return res.status(200).json({
-  recommendedList,
-  expectedCloseRange,
-  baseMedian,
-  weightedBase: Math.round(weightedBase),
-  mode,
-  compCount,
-  confidence,
+      recommendedList,
+      expectedCloseRange,
+      baseMedian,
+      weightedBase: Math.round(weightedBase),
+      mode,
+      compCount,
+      confidence,
 
-  // condition
-  conditionRating,
-  conditionMultiplier,
+      // condition
+      conditionRating,
+      conditionMultiplier,
 
-  // accident
-  accidentGrade,
-  accidentMultiplier,
+      // accident
+      accidentGrade,
+      accidentMultiplier,
 
-  // cab/box
-  cabTier,
-  cabMultiplier,
-  boxTier,
-  boxMultiplier,
+      // engine
+      engineType,
+      engineMultiplier,
 
-  // trim
-  trimTier,
-  trimMultiplier, 
+      // cab/box
+      cabTier,
+      cabMultiplier,
+      boxTier,
+      boxMultiplier,
 
-  breakdown, 
-});
+      // trim
+      trimTier,
+      trimMultiplier,
 
+      // diagnostic breakdown
+      breakdown
+    });
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
