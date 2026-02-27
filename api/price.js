@@ -51,6 +51,32 @@ function classifyTrimTier(trimRaw) {
   return { tier: "unknown", matched: null };
 }
 
+function classifyCabTier(cabRaw) {
+  const c = (cabRaw || "").toString().toUpperCase();
+
+  if (!c) return "unknown";
+
+  if (c.includes("CREW") || c.includes("MEGA")) return "premium";
+  if (c.includes("DOUBLE") || c.includes("QUAD") || c.includes("SUPERCAB")) return "mid";
+  if (c.includes("REGULAR")) return "base";
+
+  return "unknown";
+}
+
+function classifyBoxTier(boxRaw) {
+  const b = (boxRaw || "").toString().toUpperCase();
+
+  if (!b) return "unknown";
+
+  // Normalize common lengths
+  if (b.includes("8")) return "long";
+  if (b.includes("6")) return "standard";
+  if (b.includes("5")) return "short";
+
+  return "unknown";
+}
+
+
 module.exports = async (req, res) => {
   try {
     if (req.method !== "POST") {
@@ -129,6 +155,42 @@ const accidentMultiplier =
   accidentAdjustments[accidentGrade] || 1.00;
 
 adjustedPrice *= accidentMultiplier;
+  
+  // Cab/Box adjustment
+const cabTier = classifyCabTier(vehicle.cab || "");
+const boxTier = classifyBoxTier(vehicle.box || "");
+
+// Default cab multipliers (overrideable via body.cabMultipliers)
+const defaultCabMultipliers = {
+  premium: 1.04,
+  mid: 1.00,
+  base: 0.95,
+  unknown: 1.00
+};
+
+const cabMultipliers =
+  (body.cabMultipliers && typeof body.cabMultipliers === "object")
+    ? { ...defaultCabMultipliers, ...body.cabMultipliers }
+    : defaultCabMultipliers;
+
+const cabMultiplier = cabMultipliers[cabTier] || 1.00;
+adjustedPrice *= cabMultiplier;
+
+// Default box multipliers (overrideable via body.boxMultipliers)
+const defaultBoxMultipliers = {
+  short: 1.00,
+  standard: 1.00,
+  long: 0.98,
+  unknown: 1.00
+};
+
+const boxMultipliers =
+  (body.boxMultipliers && typeof body.boxMultipliers === "object")
+    ? { ...defaultBoxMultipliers, ...body.boxMultipliers }
+    : defaultBoxMultipliers;
+
+const boxMultiplier = boxMultipliers[boxTier] || 1.00;
+adjustedPrice *= boxMultiplier;
     
     // Trim tier adjustment
 const trimRaw = vehicle.trim || "";
@@ -183,6 +245,10 @@ adjustedPrice *= trimMultiplier;
       conditionMultiplier,
       trimTier,
       trimMultiplier
+      cabTier,
+      cabMultiplier,
+      boxTier,
+      boxMultiplier,
     });
 
   } catch (err) {
