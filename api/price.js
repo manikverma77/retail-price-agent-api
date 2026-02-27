@@ -59,7 +59,22 @@ module.exports = async (req, res) => {
     const weightedBase = weightedMedian(compPrices, weights);
 
     let adjustedPrice = weightedBase;
+    // Accident adjustment
+const accidentGrade = body.accidentGrade || "minor";
 
+// Default accident adjustment table (can be overridden later)
+const accidentAdjustments = {
+  none: 1.02,      // clean carfax premium
+  minor: 1.00,
+  moderate: 0.97,
+  large: 0.94
+};
+
+const accidentMultiplier =
+  accidentAdjustments[accidentGrade] || 1.00;
+
+adjustedPrice *= accidentMultiplier;
+    
     // Mode adjustment
     if (mode === "fast") {
       adjustedPrice *= 0.97; // -3%
