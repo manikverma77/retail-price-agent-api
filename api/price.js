@@ -244,7 +244,7 @@ adjustedPrice *= trimMultiplier;
       conditionRating,
       conditionMultiplier,
       trimTier,
-      trimMultiplier
+      trimMultiplier,
       cabTier,
       cabMultiplier,
       boxTier,
