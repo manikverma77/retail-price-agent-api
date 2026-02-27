@@ -103,6 +103,32 @@ function classifyBoxTier(boxRaw) {
   return "unknown";
 }
 
+function classifyEngineType({ engineRaw, fuelTypeRaw }) {
+  const e = (engineRaw || "").toString().toUpperCase();
+  const f = (fuelTypeRaw || "").toString().toUpperCase();
+
+  // Prefer explicit fuelType if provided
+  if (f.includes("DIESEL")) return "diesel";
+  if (f.includes("GAS") || f.includes("GASOLINE")) return "gas";
+  if (f.includes("HYBRID")) return "hybrid";
+  if (f.includes("ELECTRIC")) return "electric";
+
+  // Infer from engine string keywords
+  const dieselKeys = ["DIESEL", "CUMMINS", "DURAMAX", "POWER STROKE", "POWERSTROKE", "TDI", "D4D"];
+  if (dieselKeys.some(k => e.includes(k))) return "diesel";
+
+  const hybridKeys = ["HYBRID"];
+  if (hybridKeys.some(k => e.includes(k))) return "hybrid";
+
+  const electricKeys = ["ELECTRIC", "EV"];
+  if (electricKeys.some(k => e.includes(k))) return "electric";
+
+  // If we have *any* engine displacement/cyl info but no diesel/hybrid/electric hint, treat as gas
+  if (e.match(/\d\.\dL/) || e.includes("V6") || e.includes("V8") || e.includes("I4") || e.includes("I6")) return "gas";
+
+  return "unknown";
+}
+
 
 module.exports = async (req, res) => {
   try {
