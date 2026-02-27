@@ -60,6 +60,7 @@ module.exports = async (req, res) => {
     const body = req.body || {};
     const vehicle = body.vehicle || {};
     const comps = body.comps || [];
+    const compCount = comps.length;
     const mode = body.mode || "fast"; // fast or max
 
     if (!comps.length) {
