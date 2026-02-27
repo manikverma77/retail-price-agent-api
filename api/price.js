@@ -84,6 +84,31 @@ module.exports = async (req, res) => {
     const weightedBase = weightedMedian(compPrices, weights);
 
     let adjustedPrice = weightedBase;
+    // Condition adjustment (1–5)
+    const conditionRatingRaw = body.conditionRating;
+    const conditionRating = Number.isFinite(Number(conditionRatingRaw))
+      ? Math.max(1, Math.min(5, Math.round(Number(conditionRatingRaw))))
+      : 3; // default "average"
+
+// Default condition multipliers (overrideable via body.conditionMultipliers)
+const defaultConditionMultipliers = {
+  1: 0.93,
+  2: 0.97,
+  3: 1.00,
+  4: 1.02,
+  5: 1.04
+};
+
+const conditionMultipliers =
+  (body.conditionMultipliers && typeof body.conditionMultipliers === "object")
+    ? { ...defaultConditionMultipliers, ...body.conditionMultipliers }
+    : defaultConditionMultipliers;
+
+const conditionMultiplier = conditionMultipliers[conditionRating] || 1.00;
+
+adjustedPrice *= conditionMultiplier;
+
+    
     // Accident adjustment
 const accidentGrade = body.accidentGrade || "minor";
 
@@ -154,6 +179,8 @@ adjustedPrice *= trimMultiplier;
       mode,
       compCount,
       confidence,
+      conditionRating,
+      conditionMultiplier,
       trimTier,
       trimMultiplier
     });
